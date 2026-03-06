@@ -51,6 +51,7 @@ from color_processing import apply_algorithm_a_color, augment_color
 # ---------------------------------------------------------------------------
 
 MAX_ROIS = 10
+SUPPORTED_MODES = {"grey", "color", "grey_recursive"}
 
 
 def load_image(path: str) -> np.ndarray:
@@ -59,6 +60,84 @@ def load_image(path: str) -> np.ndarray:
     if img is None:
         raise FileNotFoundError(f"Cannot read image: {path}")
     return img
+
+
+def parse_bool(value: str) -> bool:
+    """Parse a text boolean value used in parameter files."""
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "n", "off"}:
+        return False
+    raise ValueError(f"Invalid boolean value: {value}")
+
+
+def parse_params_file(params_path: str) -> dict:
+    """Parse key=value parameters from a text file.
+
+    Supported keys: image, mode, p_percent, rois, histograms, save_dir.
+    Lines starting with '#' or empty lines are ignored.
+    """
+    if not os.path.exists(params_path):
+        raise FileNotFoundError(f"Parameter file not found: {params_path}")
+
+    config = {}
+    supported_keys = {"image", "mode", "p_percent", "rois", "histograms", "save_dir"}
+
+    with open(params_path, "r", encoding="utf-8") as handle:
+        for line_no, raw_line in enumerate(handle, start=1):
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+
+            if "=" not in line:
+                raise ValueError(
+                    f"Invalid parameter line {line_no} in {params_path}: '{raw_line.rstrip()}'. "
+                    "Expected format key=value."
+                )
+
+            key, value = [part.strip() for part in line.split("=", 1)]
+            if key not in supported_keys:
+                raise ValueError(
+                    f"Unknown parameter key '{key}' on line {line_no}. "
+                    f"Supported keys: {', '.join(sorted(supported_keys))}."
+                )
+
+            if key == "mode":
+                value = value.lower()
+                if value not in SUPPORTED_MODES:
+                    raise ValueError(
+                        f"Invalid mode '{value}' on line {line_no}. "
+                        f"Expected one of: {', '.join(sorted(SUPPORTED_MODES))}."
+                    )
+            elif key == "p_percent":
+                value = float(value)
+            elif key == "histograms":
+                value = parse_bool(value)
+
+            config[key] = value
+
+    return config
+
+
+def resolve_config(args: argparse.Namespace, params: dict) -> dict:
+    """Merge defaults, parameter file values, and CLI overrides."""
+    mode = args.mode if args.mode is not None else params.get("mode", "grey")
+    if mode not in SUPPORTED_MODES:
+        raise ValueError(f"Invalid mode '{mode}'. Expected one of {sorted(SUPPORTED_MODES)}")
+
+    return {
+        "image": args.image if args.image is not None else params.get("image"),
+        "mode": mode,
+        "p_percent": (
+            args.p_percent if args.p_percent is not None else params.get("p_percent", 10.0)
+        ),
+        "rois": args.rois if args.rois is not None else params.get("rois"),
+        "histograms": (
+            args.histograms if args.histograms is not None else params.get("histograms", False)
+        ),
+        "save_dir": args.save_dir if args.save_dir is not None else params.get("save_dir"),
+    }
 
 
 def select_rois_interactively(image_bgr: np.ndarray) -> list:
@@ -227,6 +306,15 @@ def parse_args():
         description="Image Processing HW2 — Histogram & Color Augmentation"
     )
     parser.add_argument(
+        "--params",
+        type=str,
+        default=None,
+        help=(
+            "Path to a parameter file (key=value per line). "
+            "CLI arguments override values from this file."
+        ),
+    )
+    parser.add_argument(
         "--image", "-i",
         type=str,
         default=None,
@@ -234,8 +322,8 @@ def parse_args():
     )
     parser.add_argument(
         "--mode", "-m",
-        choices=["grey", "color", "grey_recursive"],
-        default="grey",
+        choices=sorted(SUPPORTED_MODES),
+        default=None,
         help=(
             "Processing mode: 'grey' (1A–1C), 'color' (3A–3B), "
             "or 'grey_recursive' (1D extra credit)."
@@ -245,7 +333,7 @@ def parse_args():
     parser.add_argument(
         "--p_percent", "-p",
         type=float,
-        default=_P_DEFAULT,
+        default=None,
         help=(
             "Homogeneity threshold P (%%) for recursive stretching "
             f"(only used in grey_recursive mode). Default: {_P_DEFAULT}"
@@ -263,7 +351,8 @@ def parse_args():
     )
     parser.add_argument(
         "--histograms",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=None,
         help="Show before/after histograms for each ROI (grey mode).",
     )
     parser.add_argument(
@@ -291,9 +380,11 @@ def parse_rois_string(rois_str: str) -> list:
 
 def main():
     args = parse_args()
+    params = parse_params_file(args.params) if args.params else {}
+    config = resolve_config(args, params)
 
     # ---- Load image ----
-    if args.image is None:
+    if config["image"] is None:
         # Try a simple Tkinter file dialog if available
         try:
             import tkinter as tk
@@ -312,16 +403,16 @@ def main():
             print("No --image argument provided and no file dialog available. Exiting.")
             sys.exit(1)
     else:
-        path = args.image
+        path = config["image"]
 
     print(f"Loading image: {path}")
     image_bgr = load_image(path)
     print(f"  Image size: {image_bgr.shape[1]} x {image_bgr.shape[0]}")
 
     # ---- Select ROIs ----
-    if args.rois:
-        rois = parse_rois_string(args.rois)
-        print(f"Using {len(rois)} ROI(s) from --rois argument.")
+    if config["rois"]:
+        rois = parse_rois_string(config["rois"])
+        print(f"Using {len(rois)} ROI(s) from configuration (--rois or --params).")
     else:
         print("Opening interactive ROI selector…")
         print("  Draw ROI(s) by clicking and dragging.")
@@ -346,21 +437,21 @@ def main():
 
         roi_bgr = extract_roi(image_bgr, (x, y, w, h))
 
-        if args.mode in ("grey", "grey_recursive"):
+        if config["mode"] in ("grey", "grey_recursive"):
             roi_grey = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2GRAY)
-            p = args.p_percent if args.mode == "grey_recursive" else None
+            p = config["p_percent"] if config["mode"] == "grey_recursive" else None
             process_grey_roi(
                 roi_grey,
                 roi_index=i,
                 p_percent=p,
-                show_histograms=args.histograms,
-                save_dir=args.save_dir,
+                show_histograms=config["histograms"],
+                save_dir=config["save_dir"],
             )
         else:  # color
             process_color_roi(
                 roi_bgr,
                 roi_index=i,
-                save_dir=args.save_dir,
+                save_dir=config["save_dir"],
             )
 
     print("\nDone.")

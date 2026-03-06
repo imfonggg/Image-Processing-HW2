@@ -1,0 +1,8 @@
+# HW2 parameter file example
+# Lines are key=value
+
+image=images/sample1.jpg
+mode=grey
+rois=10,20,120,120;220,40,130,110
+histograms=true
+save_dir=outputs/run1

@@ -28,14 +28,13 @@ def apply_algorithm_a_color(
         3-D uint8 array of shape (H, W, 3) in BGR or RGB order.
     channels : str
         Which channel(s) to process.  Accepted values:
-          - "R" or "r"  → process channel index 0 (first channel)
+                    - "R" or "r"  → process channel index 2 (third channel)
           - "G" or "g"  → process channel index 1 (second channel)
-          - "B" or "b"  → process channel index 2 (third channel)
+                    - "B" or "b"  → process channel index 0 (first channel)
           - "all"       → process all three channels independently
 
-        The caller is responsible for passing the array in a consistent
-        channel order (e.g. always RGB or always BGR).  The string labels
-        "R", "G", "B" map to indices 0, 1, 2 regardless.
+                This project uses OpenCV image arrays in BGR order, so channel
+                indices are interpreted accordingly: B=0, G=1, R=2.
 
     Returns
     -------
@@ -43,7 +42,7 @@ def apply_algorithm_a_color(
         Modified 3-D uint8 array with the same shape as *roi*.
     """
     result = roi.copy()
-    ch_map = {"r": 0, "g": 1, "b": 2}
+    ch_map = {"b": 0, "g": 1, "r": 2}
 
     if channels.lower() == "all":
         for idx in range(3):

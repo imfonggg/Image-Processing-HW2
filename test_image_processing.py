@@ -40,9 +40,9 @@ def uniform_grey():
 
 @pytest.fixture
 def simple_color():
-    """50x50 RGB image with gradient in red channel only."""
+    """50x50 BGR image with gradient in red channel only (index 2)."""
     img = np.zeros((50, 50, 3), dtype=np.uint8)
-    img[:, :, 0] = np.tile(np.linspace(0, 255, 50, dtype=np.uint8), (50, 1))
+    img[:, :, 2] = np.tile(np.linspace(0, 255, 50, dtype=np.uint8), (50, 1))
     return img
 
 
@@ -236,9 +236,9 @@ class TestApplyAlgorithmAColor:
 
     def test_single_channel_r(self, simple_color):
         result = apply_algorithm_a_color(simple_color, "R")
-        # Channels 1 and 2 (G, B) must be unchanged
+        # In BGR arrays, R is index 2. So B and G must be unchanged.
+        np.testing.assert_array_equal(result[:, :, 0], simple_color[:, :, 0])
         np.testing.assert_array_equal(result[:, :, 1], simple_color[:, :, 1])
-        np.testing.assert_array_equal(result[:, :, 2], simple_color[:, :, 2])
 
     def test_single_channel_g(self, simple_color):
         result = apply_algorithm_a_color(simple_color, "G")
@@ -247,8 +247,8 @@ class TestApplyAlgorithmAColor:
 
     def test_single_channel_b(self, simple_color):
         result = apply_algorithm_a_color(simple_color, "B")
-        np.testing.assert_array_equal(result[:, :, 0], simple_color[:, :, 0])
         np.testing.assert_array_equal(result[:, :, 1], simple_color[:, :, 1])
+        np.testing.assert_array_equal(result[:, :, 2], simple_color[:, :, 2])
 
     def test_invalid_channel_raises(self, simple_color):
         with pytest.raises(ValueError):
